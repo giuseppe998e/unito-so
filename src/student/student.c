@@ -15,12 +15,12 @@ group my_group;
  * Strutture contenenti le informazioni
  * delle memorie condivise
  */
-struct _SHARED SHARED;
+struct _SHARED ST_SHARED;
 
 /**
  * Struttura contenente le configurazioni
  */
-struct _CONFIG CONFIG;
+struct _CONFIG ST_CONFIG;
 
 /**
  * Restituisce 1 se il tempo rimanente è uguale
@@ -30,7 +30,7 @@ struct _CONFIG CONFIG;
  * @return
  */
 int tempo_sim_restante() {
-    long *s = shmat(SHARED.SHM.SIM, NULL, SHM_RDONLY);
+    long *s = shmat(ST_SHARED.SHM.SIM, NULL, SHM_RDONLY);
     long timeleft = *s - (long) time(NULL);
     shmdt(s);
     return timeleft;
@@ -40,9 +40,9 @@ int tempo_sim_restante() {
  * Salva i dati dello student corrente in memoria condivisa
  */
 void save_me() {
-    if (!sem_checkfor_zero(SHARED.SEM.LCK, 0)) return;
+    if (!sem_checkfor_zero(ST_SHARED.SEM.LCK, 0)) return;
 
-    student *std = shmat(SHARED.SHM.STDS, NULL, 0);
+    student *std = shmat(ST_SHARED.SHM.STDS, NULL, 0);
     while (std->std_id != me.std_id && std->std_id > 0) std++;
     *std = me;
     shmdt(std);
@@ -54,11 +54,11 @@ void save_me() {
  */
 void save_mygroup() {
     if (my_group.members[0] != me.std_id) return;
-    if (!sem_checkfor_zero(SHARED.SEM.LCK, 1)) return;
+    if (!sem_checkfor_zero(ST_SHARED.SEM.LCK, 1)) return;
 
     my_group.vote = -1;
 
-    group *grpp = shmat(SHARED.SHM.GRPS, NULL, 0);
+    group *grpp = shmat(ST_SHARED.SHM.GRPS, NULL, 0);
     while (grpp->members[0] != me.std_id && grpp->members[0] > 0) grpp++;
     *grpp = my_group;
     shmdt(grpp);
@@ -75,18 +75,18 @@ void group_receive_request(message *msgrcvd, short *is_waiting, short *mempos) {
     int resp_data[3] = {0, -1, -1};
     if (msgrcvd->mtext[0] > 1) {
         if (me.group_leader > 0 || *is_waiting) {
-            msg_send(SHARED.MSG.SIM, msgrcvd->msender, resp_data);
+            msg_send(ST_SHARED.MSG.SIM, msgrcvd->msender, resp_data);
             return;
         }
 
-        if (CONFIG.MAX_REJECT > 0) {
+        if (ST_CONFIG.MAX_REJECT > 0) {
             if (tempo_sim_restante() > SHORT_WHILE) {
                 if (msgrcvd->mtext[0] >= me.ade_vote) {
                     me.group_leader = msgrcvd->msender;
                     save_me();
                     resp_data[0] = 1;
                 } else {
-                    CONFIG.MAX_REJECT--;
+                    ST_CONFIG.MAX_REJECT--;
                 }
             } else {
                 if (msgrcvd->mtext[1] - msgrcvd->mtext[2] == 1 || msgrcvd->mtext[0] >= me.ade_vote) {
@@ -94,7 +94,7 @@ void group_receive_request(message *msgrcvd, short *is_waiting, short *mempos) {
                     save_me();
                     resp_data[0] = 1;
                 } else {
-                    CONFIG.MAX_REJECT--;
+                    ST_CONFIG.MAX_REJECT--;
                 }
             }
         } else {
@@ -102,7 +102,7 @@ void group_receive_request(message *msgrcvd, short *is_waiting, short *mempos) {
             save_me();
             resp_data[0] = 1;
         }
-        msg_send(SHARED.MSG.SIM, msgrcvd->msender, resp_data);
+        msg_send(ST_SHARED.MSG.SIM, msgrcvd->msender, resp_data);
 
     } else {
         *is_waiting = 0;
@@ -144,9 +144,9 @@ void group_send_request(short *is_waiting, const short *mempos) {
     if (my_group.members[me.max_members - 1] > 0) return;
 
     static int old_random_std = 0;
-    student *stds = shmat(SHARED.SHM.STDS, NULL, SHM_RDONLY);
-    while (CONFIG.NOF_INVITES) {
-        int random_std = rand() % CONFIG.POP_SIZE;
+    student *stds = shmat(ST_SHARED.SHM.STDS, NULL, SHM_RDONLY);
+    while (ST_CONFIG.NOF_INVITES) {
+        int random_std = rand() % ST_CONFIG.POP_SIZE;
 
         if (old_random_std == random_std) continue;
         else old_random_std = random_std;
@@ -156,9 +156,9 @@ void group_send_request(short *is_waiting, const short *mempos) {
         if (stds[random_std].group_leader > 0) continue;
 
         int req_data[3] = {me.ade_vote, me.max_members, *mempos};
-        if (msg_send(SHARED.MSG.SIM, stds[random_std].std_id, req_data) > -1) {
+        if (msg_send(ST_SHARED.MSG.SIM, stds[random_std].std_id, req_data) > -1) {
             *is_waiting = 1;
-            CONFIG.NOF_INVITES--;
+            ST_CONFIG.NOF_INVITES--;
             break;
         }
     }
@@ -176,7 +176,7 @@ void create_group() {
 
     while (tempo_sim_restante()) {
         message msgrcvd;
-        if (msgrcv(SHARED.MSG.SIM, &msgrcvd, message_size(), me.std_id, IPC_NOWAIT) > -1) {
+        if (msgrcv(ST_SHARED.MSG.SIM, &msgrcvd, message_size(), me.std_id, IPC_NOWAIT) > -1) {
             group_receive_request(&msgrcvd, &is_waiting, &mempos);
         } else if (me.group_leader == 0 || me.group_leader == me.std_id) {
             if (is_waiting) continue;
@@ -213,11 +213,11 @@ void read_pipe_data(int *fp1, int *fp2) {
 
     writeval = 1;
     write(fp2[WRITE], &writeval, sizeof(int));
-    read(fp1[READ], &SHARED, sizeof(struct _SHARED));
+    read(fp1[READ], &ST_SHARED, sizeof(struct _SHARED));
 
     writeval = 2;
     write(fp2[WRITE], &writeval, sizeof(int));
-    read(fp1[READ], &CONFIG, sizeof(struct _CONFIG));
+    read(fp1[READ], &ST_CONFIG, sizeof(struct _CONFIG));
 
     writeval = -1;
     write(fp2[WRITE], &writeval, sizeof(int));
@@ -263,7 +263,7 @@ void std_main(int *fp1, int *fp2) {
     initialize_me();
     save_me();
 
-    sem_waitfor_zero(SHARED.SEM.SIM, 0);
+    sem_waitfor_zero(ST_SHARED.SEM.SIM, 0);
 
     create_group();
 
